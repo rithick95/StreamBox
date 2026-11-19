@@ -1,0 +1,609 @@
+name: Build StreamBox APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Create project files
+        run: |
+          set -e
+          cat > settings.gradle <<'SBEOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'StreamBox'
+          include ':app'
+          SBEOF
+          cat > build.gradle <<'SBEOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          SBEOF
+          cat > gradle.properties <<'SBEOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          SBEOF
+          mkdir -p app
+          cat > app/build.gradle <<'SBEOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.streambox.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.streambox.app'
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+                  ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'org.videolan.android:libvlc-all:3.6.0'
+              implementation 'com.google.android.gms:play-services-auth:21.2.0'
+          }
+          SBEOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <application
+                  android:label="StreamBox"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data android:scheme="streambox" android:host="auth" />
+                      </intent-filter>
+                  </activity>
+                  <activity
+                      android:name=".PlayerActivity"
+                      android:exported="false"
+                      android:screenOrientation="sensorLandscape"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
+                      android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+              </application>
+          </manifest>
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/MainActivity.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.accounts.AccountManager
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import com.google.android.gms.auth.api.identity.Identity
+          import com.google.android.gms.common.AccountPicker
+          import org.json.JSONObject
+
+          class MainActivity : Activity() {
+              private lateinit var web: WebView
+              private val base = "https://rithick95.github.io/StreamBox/"
+              private val rcPick = 11
+              private val rcAuth = 12
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  window.statusBarColor = 0xFF0A0F1C.toInt()
+                  window.navigationBarColor = 0xFF0A0F1C.toInt()
+                  web = WebView(this)
+                  web.setBackgroundColor(0xFF0A0F1C.toInt())
+                  setContentView(web)
+                  val s = web.settings
+                  s.javaScriptEnabled = true
+                  s.domStorageEnabled = true
+                  web.webViewClient = object : WebViewClient() {
+                      override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                          if (r.url.toString().startsWith(base)) return false
+                          startActivity(Intent(Intent.ACTION_VIEW, r.url))
+                          return true
+                      }
+                  }
+                  web.addJavascriptInterface(Bridge(), "Android")
+                  web.loadUrl(base)
+              }
+
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun signIn(email: String) {
+                      runOnUiThread { if (email.isEmpty()) pick() else authorize(email) }
+                  }
+
+                  @JavascriptInterface
+                  fun play(json: String) {
+                      runOnUiThread {
+                          startActivity(Intent(this@MainActivity, PlayerActivity::class.java).putExtra("data", json))
+                      }
+                  }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun pick() {
+                  val i = AccountPicker.newChooseAccountIntent(null, null, arrayOf("com.google"), true, null, null, null, null)
+                  startActivityForResult(i, rcPick)
+              }
+
+              private fun authorize(email: String) {
+                  Identity.getAuthorizationClient(this).authorize(Auth.request(email))
+                      .addOnSuccessListener { r ->
+                          if (r.hasResolution()) {
+                              try {
+                                  startIntentSenderForResult(r.pendingIntent!!.intentSender, rcAuth, null, 0, 0, 0)
+                              } catch (e: Exception) { err(e.message) }
+                          } else deliver(r.accessToken)
+                      }
+                      .addOnFailureListener { err(it.message) }
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
+                  super.onActivityResult(rc, res, data)
+                  if (rc == rcPick) {
+                      val n = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                      if (res == RESULT_OK && n != null) authorize(n) else err("Cancelled")
+                  } else if (rc == rcAuth) {
+                      try {
+                          deliver(Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data).accessToken)
+                      } catch (e: Exception) { err(e.message) }
+                  }
+              }
+
+              private fun deliver(t: String?) {
+                  if (t == null) err("No token received")
+                  else web.evaluateJavascript("window.nativeToken&&nativeToken(" + JSONObject.quote(t) + ",3300)", null)
+              }
+
+              private fun err(m: String?) {
+                  web.evaluateJavascript("window.nativeAuthError&&nativeAuthError(" + JSONObject.quote((m ?: "Sign-in failed") + "  [App SHA-1: " + sha1() + "]") + ")", null)
+              }
+
+              @Suppress("DEPRECATION")
+              private fun sha1(): String = try {
+                  val sig = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES).signatures[0]
+                  java.security.MessageDigest.getInstance("SHA-1").digest(sig.toByteArray()).joinToString(":") { "%02X".format(it) }
+              } catch (e: Exception) { "unknown" }
+
+              @Suppress("DEPRECATION")
+              override fun onBackPressed() {
+                  if (web.canGoBack()) web.goBack() else super.onBackPressed()
+              }
+          }
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/Auth.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.accounts.Account
+          import android.app.Activity
+          import com.google.android.gms.auth.api.identity.AuthorizationRequest
+          import com.google.android.gms.auth.api.identity.Identity
+          import com.google.android.gms.common.api.Scope
+          import com.google.android.gms.tasks.Tasks
+          import java.util.concurrent.TimeUnit
+
+          object Auth {
+              fun request(email: String): AuthorizationRequest =
+                  AuthorizationRequest.builder()
+                      .setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/drive.readonly")))
+                      .setAccount(Account(email, "com.google"))
+                      .build()
+
+              fun blocking(act: Activity, email: String): String? = try {
+                  val r = Tasks.await(Identity.getAuthorizationClient(act).authorize(request(email)), 20, TimeUnit.SECONDS)
+                  if (r.hasResolution()) null else r.accessToken
+              } catch (e: Exception) { null }
+          }
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/PlayerActivity.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Context
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.Gravity
+          import android.view.View
+          import android.view.WindowManager
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.SeekBar
+          import android.widget.TextView
+          import android.widget.Toast
+          import org.json.JSONObject
+          import org.videolan.libvlc.LibVLC
+          import org.videolan.libvlc.Media
+          import org.videolan.libvlc.MediaPlayer
+          import org.videolan.libvlc.util.VLCVideoLayout
+
+          class PlayerActivity : Activity() {
+              private lateinit var vlc: LibVLC
+              private lateinit var mp: MediaPlayer
+              private lateinit var layout: VLCVideoLayout
+              private lateinit var ui: LinearLayout
+              private lateinit var titleV: TextView
+              private lateinit var timeV: TextView
+              private lateinit var playV: TextView
+              private lateinit var speedV: TextView
+              private lateinit var seek: SeekBar
+              private lateinit var px: Proxy
+              private val ids = ArrayList<String>()
+              private val names = ArrayList<String>()
+              private var idx = 0
+              private var token = ""
+              private var length = 0L
+              private var dragging = false
+              private var started = false
+              private var failed = false
+              private var lastSave = 0L
+              private var si = 0
+              private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 2f, 0.75f)
+              private val h = Handler(Looper.getMainLooper())
+              private val hide = Runnable { ui.visibility = View.GONE }
+
+              private fun tv(t: String, sp: Float = 20f, click: (() -> Unit)? = null): TextView {
+                  val v = TextView(this)
+                  v.text = t
+                  v.textSize = sp
+                  v.setTextColor(Color.WHITE)
+                  v.setPadding(28, 16, 28, 16)
+                  v.gravity = Gravity.CENTER
+                  if (click != null) v.setOnClickListener { click(); showUi() }
+                  return v
+              }
+
+              private fun showUi() {
+                  ui.visibility = View.VISIBLE
+                  h.removeCallbacks(hide)
+                  h.postDelayed(hide, 5000)
+              }
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  val j = JSONObject(intent.getStringExtra("data") ?: "{}")
+                  token = j.optString("token")
+                  px = Proxy(this, j.optString("email"), token)
+                  px.start()
+                  idx = j.optInt("index")
+                  val arr = j.getJSONArray("items")
+                  for (i in 0 until arr.length()) {
+                      val o = arr.getJSONObject(i)
+                      ids.add(o.getString("id"))
+                      names.add(o.getString("name"))
+                  }
+                  vlc = LibVLC(this, arrayListOf("--http-reconnect", "--network-caching=3000"))
+                  mp = MediaPlayer(vlc)
+                  layout = VLCVideoLayout(this)
+                  val root = FrameLayout(this)
+                  root.setBackgroundColor(Color.BLACK)
+                  root.addView(layout, FrameLayout.LayoutParams(-1, -1))
+
+                  ui = LinearLayout(this)
+                  ui.orientation = LinearLayout.VERTICAL
+                  ui.setBackgroundColor(0x77000000)
+                  titleV = tv("", 16f)
+                  titleV.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                  playV = tv("▶", 34f) { if (mp.isPlaying()) mp.pause() else mp.play() }
+                  val mid = LinearLayout(this)
+                  mid.gravity = Gravity.CENTER
+                  mid.addView(tv("⟲ 10", 18f) { mp.setTime(maxOf(0L, mp.getTime() - 10000L)) })
+                  mid.addView(playV)
+                  mid.addView(tv("10 ⟳", 18f) { mp.setTime(mp.getTime() + 10000L) })
+                  seek = SeekBar(this)
+                  seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                          if (fromUser) mp.setTime(p.toLong())
+                      }
+                      override fun onStartTrackingTouch(s: SeekBar?) { dragging = true }
+                      override fun onStopTrackingTouch(s: SeekBar?) { dragging = false; showUi() }
+                  })
+                  timeV = tv("0:00 / 0:00", 14f)
+                  speedV = tv("1x", 16f) {
+                      si = (si + 1) % speeds.size
+                      mp.setRate(speeds[si])
+                      speedV.text = speeds[si].toString() + "x"
+                  }
+                  val row = LinearLayout(this)
+                  row.gravity = Gravity.CENTER_VERTICAL
+                  row.addView(timeV, LinearLayout.LayoutParams(0, -2, 1f))
+                  row.addView(tv("Audio", 16f) { pick("Audio track", mp.getAudioTracks(), mp.getAudioTrack()) { mp.setAudioTrack(it) } })
+                  row.addView(tv("Subtitles", 16f) { pick("Subtitles", mp.getSpuTracks(), mp.getSpuTrack()) { mp.setSpuTrack(it) } })
+                  row.addView(tv("Next", 16f) { if (idx < ids.size - 1) open(idx + 1) })
+                  row.addView(speedV)
+                  ui.addView(titleV)
+                  ui.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f))
+                  ui.addView(seek)
+                  ui.addView(row)
+                  ui.setOnClickListener { ui.visibility = View.GONE }
+                  root.addView(ui, FrameLayout.LayoutParams(-1, -1))
+                  root.setOnClickListener { showUi() }
+                  setContentView(root)
+
+                  mp.setEventListener { e ->
+                      when (e.type) {
+                          MediaPlayer.Event.LengthChanged -> {
+                              length = e.lengthChanged
+                              seek.max = length.toInt()
+                          }
+                          MediaPlayer.Event.TimeChanged -> {
+                              val t = e.timeChanged
+                              if (!dragging) seek.progress = t.toInt()
+                              timeV.text = fmt(t) + " / " + fmt(length)
+                              val now = System.currentTimeMillis()
+                              if (now - lastSave > 5000) { lastSave = now; savePos() }
+                          }
+                          MediaPlayer.Event.Playing -> playV.text = "❚❚"
+                          MediaPlayer.Event.Paused -> playV.text = "▶"
+                          MediaPlayer.Event.EndReached -> {
+                              clearPos()
+                              if (idx < ids.size - 1) open(idx + 1) else finish()
+                          }
+                          MediaPlayer.Event.EncounteredError -> fail()
+                      }
+                  }
+                  showUi()
+              }
+
+              private fun pick(title: String, tracks: Array<MediaPlayer.TrackDescription>?, cur: Int, set: (Int) -> Unit) {
+                  if (tracks == null || tracks.isEmpty()) {
+                      Toast.makeText(this, "No tracks found", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  val labels = tracks.map { (if (it.id == cur) "✓ " else "    ") + it.name }.toTypedArray()
+                  AlertDialog.Builder(this).setTitle(title).setItems(labels) { _, w -> set(tracks[w].id) }.show()
+              }
+
+              private fun open(i: Int) {
+                  idx = i
+                  titleV.text = names[i]
+                  length = 0L
+                  seek.progress = 0
+                  val id = ids[i]
+                  val url = "http://127.0.0.1:" + px.port + "/" + id
+                  val m = Media(vlc, Uri.parse(url))
+                  m.setHWDecoderEnabled(true, false)
+                  val p = getSharedPreferences("pos", Context.MODE_PRIVATE).getLong(id, 0L)
+                  if (p > 15000L) m.addOption(":start-time=" + (p / 1000L))
+                  mp.setMedia(m)
+                  m.release()
+                  mp.play()
+              }
+
+              private fun savePos() {
+                  if (ids.isEmpty() || length <= 0L) return
+                  val t = mp.getTime()
+                  getSharedPreferences("pos", Context.MODE_PRIVATE).edit()
+                      .putLong(ids[idx], if (t < length - 30000L) t else 0L).apply()
+              }
+
+              private fun clearPos() {
+                  getSharedPreferences("pos", Context.MODE_PRIVATE).edit().remove(ids[idx]).apply()
+              }
+
+              private fun fail() {
+                  if (failed) return
+                  failed = true
+                  AlertDialog.Builder(this)
+                      .setMessage(failMsg())
+                      .setPositiveButton("OK") { _, _ -> finish() }
+                      .setCancelable(false)
+                      .show()
+              }
+
+              private fun failMsg(): String = when {
+                  px.lastError.isNotEmpty() -> "Drive refused the stream: " + px.lastError + "\n\nIf this says 401, sign in again."
+                  px.ok -> "The stream opened but the player could not play this file."
+                  else -> "Could not reach the stream. Check your connection or sign in again."
+              }
+
+              private fun fmt(ms: Long): String {
+                  val s = ms / 1000
+                  val hh = s / 3600
+                  val mm = (s % 3600) / 60
+                  val ss = s % 60
+                  return if (hh > 0) "%d:%02d:%02d".format(hh, mm, ss) else "%d:%02d".format(mm, ss)
+              }
+
+              override fun onStart() {
+                  super.onStart()
+                  mp.attachViews(layout, null, true, false)
+                  if (!started) { started = true; open(idx) } else mp.play()
+              }
+
+              override fun onStop() {
+                  super.onStop()
+                  savePos()
+                  mp.pause()
+                  mp.detachViews()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  h.removeCallbacksAndMessages(null)
+                  mp.release()
+                  vlc.release()
+                  px.stop()
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onWindowFocusChanged(f: Boolean) {
+                  super.onWindowFocusChanged(f)
+                  if (f) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                      View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                      View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                      View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+              }
+          }
+
+          class Proxy(private val act: android.app.Activity, private val email: String, first: String) {
+              @Volatile private var token = first
+              private var issued = System.currentTimeMillis()
+              private val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+              val port: Int get() = server.localPort
+              @Volatile var lastError = ""
+              @Volatile var ok = false
+
+              fun start() {
+                  Thread {
+                      while (!server.isClosed) {
+                          try {
+                              val c = server.accept()
+                              Thread { handle(c) }.start()
+                          } catch (e: Exception) { break }
+                      }
+                  }.start()
+              }
+
+              fun stop() {
+                  try { server.close() } catch (e: Exception) { }
+              }
+
+              private fun fresh(): Boolean {
+                  val t = Auth.blocking(act, email) ?: return false
+                  token = t
+                  issued = System.currentTimeMillis()
+                  return true
+              }
+
+              private fun connect(id: String, range: String?): java.net.HttpURLConnection {
+                  val h = java.net.URL("https://www.googleapis.com/drive/v3/files/" + id + "?alt=media&supportsAllDrives=true").openConnection() as java.net.HttpURLConnection
+                  h.setRequestProperty("Authorization", "Bearer " + token)
+                  h.setRequestProperty("Accept-Encoding", "identity")
+                  if (range != null) h.setRequestProperty("Range", range)
+                  h.connectTimeout = 15000
+                  h.readTimeout = 30000
+                  return h
+              }
+
+              private fun handle(c: java.net.Socket) {
+                  try {
+                      c.use {
+                          val inp = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                          val first = inp.readLine() ?: return
+                          val parts = first.split(" ")
+                          var range: String? = null
+                          while (true) {
+                              val l = inp.readLine() ?: break
+                              if (l.isEmpty()) break
+                              if (l.startsWith("Range:", true)) range = l.substring(6).trim()
+                          }
+                          val id = parts[1].trimStart('/').substringBefore('?')
+                          if (email.isNotEmpty() && System.currentTimeMillis() - issued > 2700000L) fresh()
+                          var h = connect(id, range)
+                          var code = h.responseCode
+                          if (code == 401 && email.isNotEmpty() && fresh()) {
+                              h = connect(id, range)
+                              code = h.responseCode
+                          }
+                          val out = c.getOutputStream().buffered(65536)
+                          if (code >= 400) {
+                              val msg = (h.errorStream?.bufferedReader()?.readText() ?: "").take(300)
+                              lastError = "HTTP " + code + " " + msg
+                              val body = lastError.toByteArray()
+                              out.write(("HTTP/1.1 " + code + " Error\r\nContent-Length: " + body.size + "\r\nConnection: close\r\n\r\n").toByteArray())
+                              out.write(body)
+                              out.flush()
+                              return
+                          }
+                          ok = true
+                          val sb = StringBuilder("HTTP/1.1 " + code + (if (code == 206) " Partial Content" else " OK") + "\r\n")
+                          for (k in listOf("Content-Type", "Content-Length", "Content-Range")) {
+                              val v = h.getHeaderField(k)
+                              if (v != null) sb.append(k + ": " + v + "\r\n")
+                          }
+                          sb.append("Accept-Ranges: bytes\r\nConnection: close\r\n\r\n")
+                          out.write(sb.toString().toByteArray())
+                          if (parts[0] != "HEAD") h.inputStream.use { it.copyTo(out, 65536) }
+                          out.flush()
+                      }
+                  } catch (e: Exception) { }
+              }
+          }
+          SBEOF
+      - name: Use fixed debug signing key
+        run: |
+          mkdir -p ~/.android
+          echo 'MIIKZgIBAzCCChAGCSqGSIb3DQEHAaCCCgEEggn9MIIJ+TCCBcAGCSqGSIb3DQEHAaCCBbEEggWtMIIFqTCCBaUGCyqGSIb3DQEMCgECoIIFQDCCBTwwZgYJKoZIhvcNAQUNMFkwOAYJKoZIhvcNAQUMMCsEFCfljn6JYphymQ4AHEGgl5yOqtR6AgInEAIBIDAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQQRalEYlaAhBKm+cJPvkDgQSCBNApLlvrczJdmfisrPypumiz2fTmMpUwasq6Nch8z4h3cmw0sM5fcAlz5AfrMit7a20C9lMUWGDfOazBNdaqpCBtfIjUncgOlOSVuSY7j0AA4s/DZo5PgX1XPRV+kXsw4M8/R7Jj7+KQjinSlEC+LbVHB4P6Lu5dFO6tyHMfLkfQonEI7sLLIa3rhKtfUYJ3pcQcP4rTCiVG0yL+mQQgILUKss88eDOud+V3GzUT7R29BP+Vce+Qky73DxlTNmmC9pHkj3l0lltLw8jq32yUhCKCddLx+5Snv7osuT1YNWBAgLA0lf2WAkQp9KGcwh8hrhgmzHkrZB3AWwRUrff7vAni8yTxg4jXEh9ds59usGmKfq9MpjWs72fcDmWzoidKpf0tyQSMoSLQA8MzkLH4cE7r/Ju7Laq3ckSvhGY63Ta0zgY6tBLbQ4gvXukIwMAToNmgfd1z97reO96vmAL+4F7+7p8AvKgDNgH5gHgPdoGqsxMbVqUaOOs6mr3NEjzEy1cq9FOd1VTxc+LQLDirBO3KSfkwJNf95APZ5gPEKnUMl79R20CF29Dk7MrU6BiHDVEo+9wCDSnz5cZxpY3fCIIhHXnodZ0bNUEMNTREjjD10sft5ScfsMOsnZAx9q3yKCSnLqCS83VGbgxHC6fMdaC12g9oN76X74hKArP6fXJNzOCL+wvhYf47B8a7sGUjxw0Zcz1D5Pg0NJY8lAkCqAAZpq0hopaxY7AGGaQbxhW80JzIN3c8j45YPtsB37vhWf/D+0U74njDissz743D2iPbBoo5NpQqqtAQbfDK51SqkzZQUxAILqu0VdrTA2OSFLto/MDoQDqx10GNgQXA03mjsyuK4PUZgCIRCiLQeV3rlFA7MHk5FEhD+wG9yTdF1ukPSCqnyjkLp+C/lQZZ5brhJ5tzPk0+K/0ekqOxnNZVvUOIwNTEuD/VpCXYS3U09oNI1icEejZO0ccnCLOiUycGELgm+zJBoHGMs7nt9wSMGFfmnHYdp3LCNf7b7pagNYH1zi0TBsphwJoKoSXMfzlu/5cFKA4g8dKaV0fSqD75rAFipnCal0EVQL/BrYCvIHEMgVi7FHvBRVrz4WzuCzt2RV2fKlJ4HP2wL/Tz0ETkeb2mmxRo/iPMbzCdtsNLUbPLgjspTUws9msHNvZpD0ku0AHK6ekt+Fi40qSxUd0iNEiPqhiv4pXxaM2oGI6vqxk+tBFYi3k5JMEaDbHb7m6s0Kl8J2dD+GPVoXZ4TjIVFYMYzWGmaRs9JM1JESoaWlP3MrD8AP4lXtceJOUiJ9EVstXqWzPE9jx/oJzXp/zh1okKtDcluPHlYWQJ/JOaIhWIZAtemDGHIebZlQMWxjHzpvzSSVchZ1HIDPa9/d+xfLusl7XwbUzroNFisNJld4gUo8cF9xj/zlKOJEo6J9jckhWZSiV+ZnkU8EpDb8833UBD8b0JjQwCDFf/1b0dTqt57jflI1nGCdJoWMii6RJTf8QuwFStY5+W+supqzu4OLrF4c1tkJemSP32FCQ3iVjs/FH0B92RKsy5oRODH62iPa+IrdDcHWug4W0+NePbRaduQX/mqZHp+PuPgWTmL957Ps7eu4iNKFVfbYRpNWcBH3e7wmg0e2vbWmPwsMc7UDFSMC0GCSqGSIb3DQEJFDEgHh4AYQBuAGQAcgBvAGkAZABkAGUAYgB1AGcAawBlAHkwIQYJKoZIhvcNAQkVMRQEElRpbWUgMTc5NTA4NDM1NDIwNTCCBDEGCSqGSIb3DQEHBqCCBCIwggQeAgEAMIIEFwYJKoZIhvcNAQcBMGYGCSqGSIb3DQEFDTBZMDgGCSqGSIb3DQEFDDArBBQ2e6weT/0cQu2/SBc3DjNYIBFNpgICJxACASAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEA0fvTruPN/Z2obIR1QoR9aAggOgjbucx8fvau48mSNk3aKT0lky8ieJZ86JgslshYHBTOKeD5PgjPwbjQr6VzpDf/GOL1/X2syuCphcip+jzivABELJUXoJpVJQpZUJGdjXan9ndsdNvmuK5M0ImfPJibVRdinQrqlAqwVA8thdghnJZF/WStSM2NBfi7zChRvywikOXiFYyPomsKXaILP/rhXvxbfoJ3Njp//TFGYPhAtLgvUe9haAwPlo4qdQJjXHNsue/G5En2nGiUkvV5F+r1XYM8K1sa3Mr1pLg0DMCTN5JQhBYv3AXxXk9lUTLROmtmgoFQeVgue8VUV6pJQPapTeYkMKzUAtWr3FJ3xEJi2hJEeFXL07OQ2jiNbhB+BuR1iulnOcN97bMLL+Q6HuOQm4nJ48yewzW+7E4g7YBSflMmPdgSrO/7z5ARMWMWDsvy3YdU6qiTQ15oX8uzHMO73FUAJLg/oNtIxXweUUR7QwKZFLrqpitPtU991E4urKd9Nhx6N+OInIR6GhCL1g++HqFTyq2FA8YA4vcuIT8Yofqd4MPuC4pplg1G8F0LyuOTx3n/bIl3ko361zWbSJemRXNYAxy6SoHaAGTQGv9UTQQnrUeOkLqA74Kp2Nr+b9eSV8D3m5sz/KxlwrzBXF37qhKz8eJ3RIeeGF1MveAbzM669KH8BtgxcESGWoW43Xka2J88N9dY0ya1v4aL/R84NhJ92ZV14YRQbGQ5rgPGZ9UNXO/FDzDiAKKEl0DQYU8au70iQ1ZGJlFeG1CvCVEiN74S4fuAYdyocBK315x79hgBiB//oqa8HkfGVPt0/yb3mhcCDAf3QtEBR/lA8BORO0kFVeY1C6Vhb0r5DLgjNt5TxrpaArfUqRbFfp4T/ztF9lVlRIulUHcUoK1Ocvs7h3bNI0GggVq3YctYJlyTau1mNPYneLV0y3dtE8sP5Ja7HRdcRMsIKAk1QDc67V33gp5kRQeby8TP+2pzySnCDOfOhst5dbNnj5P0xxCmTxATlfc9BPNsraXr7GlVjxnhVl+Pp6xoCOYJKtEzct5XmHfX7J9x+4BSUpHhnba5X+CC3huafhVCvIauPU11cbNYL4lJjq5pQFpA8wXsF7ARJ3se2jpB5wUP7o33pa3CAJEUvsx1athelRS+n+ZPW1r7Pg/pXJCyEpyyRGCWsryDeUzIuudgdgRlK8Jk0aWM1Air0spNOGC2uXtatvbwDI+2hjQCPt8BQVkJNCT3bblFG9FDBNMDEwDQYJYIZIAWUDBAIBBQAEIFg1r9eDszTtSeCDTrYD7tc6qT3koHHPOSRvlWCkBvfXBBTIXqoTP6u5DlYZuY11BCk291/TAgICJxA=' | base64 -d > ~/.android/debug.keystore
+      - name: Add app icon
+        run: |
+          set -e
+          test -f icon-512.png || { echo "icon-512.png is missing from the repo root"; exit 1; }
+          IM=$(command -v magick || command -v convert)
+          R=app/src/main/res
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            mkdir -p $R/mipmap-${d%%:*}
+            $IM icon-512.png -resize ${d##*:}x${d##*:} $R/mipmap-${d%%:*}/ic_launcher.png
+          done
+          $IM icon-512.png -resize 366x366 -background black -gravity center -extent 432x432 $R/mipmap-xxxhdpi/ic_launcher_foreground.png
+          mkdir -p $R/mipmap-anydpi-v26 $R/values
+          cat > $R/mipmap-anydpi-v26/ic_launcher.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          SBEOF
+          cat > $R/values/ic_launcher_background.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#000000</color>
+          </resources>
+          SBEOF
+          sed -i 's|<application|<application android:icon="@mipmap/ic_launcher"|' app/src/main/AndroidManifest.xml
+      - name: Build APK
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace || { sed -i 's/libvlc-all:3.6.0/libvlc-all:3.5.1/' app/build.gradle; gradle assembleDebug --no-daemon --stacktrace; }
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: StreamBox APK ${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
