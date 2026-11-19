@@ -1,0 +1,600 @@
+name: Build StreamBox APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Create project files
+        run: |
+          set -e
+          cat > settings.gradle <<'SBEOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'StreamBox'
+          include ':app'
+          SBEOF
+          cat > build.gradle <<'SBEOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          SBEOF
+          cat > gradle.properties <<'SBEOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          SBEOF
+          mkdir -p app
+          cat > app/build.gradle <<'SBEOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.streambox.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.streambox.app'
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+                  ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'org.videolan.android:libvlc-all:3.6.0'
+              implementation 'com.google.android.gms:play-services-auth:21.2.0'
+          }
+          SBEOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <application
+                  android:label="StreamBox"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data android:scheme="streambox" android:host="auth" />
+                      </intent-filter>
+                  </activity>
+                  <activity
+                      android:name=".PlayerActivity"
+                      android:exported="false"
+                      android:screenOrientation="sensorLandscape"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
+                      android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+              </application>
+          </manifest>
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/MainActivity.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.accounts.AccountManager
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import com.google.android.gms.auth.api.identity.Identity
+          import com.google.android.gms.common.AccountPicker
+          import org.json.JSONObject
+
+          class MainActivity : Activity() {
+              private lateinit var web: WebView
+              private val base = "https://rithick95.github.io/StreamBox/"
+              private val rcPick = 11
+              private val rcAuth = 12
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  window.statusBarColor = 0xFF0A0F1C.toInt()
+                  window.navigationBarColor = 0xFF0A0F1C.toInt()
+                  web = WebView(this)
+                  web.setBackgroundColor(0xFF0A0F1C.toInt())
+                  setContentView(web)
+                  val s = web.settings
+                  s.javaScriptEnabled = true
+                  s.domStorageEnabled = true
+                  web.webViewClient = object : WebViewClient() {
+                      override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                          if (r.url.toString().startsWith(base)) return false
+                          startActivity(Intent(Intent.ACTION_VIEW, r.url))
+                          return true
+                      }
+                  }
+                  web.addJavascriptInterface(Bridge(), "Android")
+                  web.loadUrl(base)
+              }
+
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun signIn(email: String) {
+                      runOnUiThread { if (email.isEmpty()) pick() else authorize(email) }
+                  }
+
+                  @JavascriptInterface
+                  fun play(json: String) {
+                      runOnUiThread {
+                          startActivity(Intent(this@MainActivity, PlayerActivity::class.java).putExtra("data", json))
+                      }
+                  }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun pick() {
+                  val i = AccountPicker.newChooseAccountIntent(null, null, arrayOf("com.google"), true, null, null, null, null)
+                  startActivityForResult(i, rcPick)
+              }
+
+              private fun authorize(email: String) {
+                  Identity.getAuthorizationClient(this).authorize(Auth.request(email))
+                      .addOnSuccessListener { r ->
+                          if (r.hasResolution()) {
+                              try {
+                                  startIntentSenderForResult(r.pendingIntent!!.intentSender, rcAuth, null, 0, 0, 0)
+                              } catch (e: Exception) { err(e.message) }
+                          } else deliver(r.accessToken)
+                      }
+                      .addOnFailureListener { err(it.message) }
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
+                  super.onActivityResult(rc, res, data)
+                  if (rc == rcPick) {
+                      val n = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                      if (res == RESULT_OK && n != null) authorize(n) else err("Cancelled")
+                  } else if (rc == rcAuth) {
+                      try {
+                          deliver(Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data).accessToken)
+                      } catch (e: Exception) { err(e.message) }
+                  }
+              }
+
+              private fun deliver(t: String?) {
+                  if (t == null) err("No token received")
+                  else web.evaluateJavascript("window.nativeToken&&nativeToken(" + JSONObject.quote(t) + ",3300)", null)
+              }
+
+              private fun err(m: String?) {
+                  web.evaluateJavascript("window.nativeAuthError&&nativeAuthError(" + JSONObject.quote((m ?: "Sign-in failed") + "  [App SHA-1: " + sha1() + "]") + ")", null)
+              }
+
+              @Suppress("DEPRECATION")
+              private fun sha1(): String = try {
+                  val sig = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES).signatures[0]
+                  java.security.MessageDigest.getInstance("SHA-1").digest(sig.toByteArray()).joinToString(":") { "%02X".format(it) }
+              } catch (e: Exception) { "unknown" }
+
+              @Suppress("DEPRECATION")
+              override fun onBackPressed() {
+                  if (web.canGoBack()) web.goBack() else super.onBackPressed()
+              }
+          }
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/Auth.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.accounts.Account
+          import android.app.Activity
+          import com.google.android.gms.auth.api.identity.AuthorizationRequest
+          import com.google.android.gms.auth.api.identity.Identity
+          import com.google.android.gms.common.api.Scope
+          import com.google.android.gms.tasks.Tasks
+          import java.util.concurrent.TimeUnit
+
+          object Auth {
+              fun request(email: String): AuthorizationRequest =
+                  AuthorizationRequest.builder()
+                      .setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/drive.readonly")))
+                      .setAccount(Account(email, "com.google"))
+                      .build()
+
+              fun blocking(act: Activity, email: String): String? = try {
+                  val r = Tasks.await(Identity.getAuthorizationClient(act).authorize(request(email)), 20, TimeUnit.SECONDS)
+                  if (r.hasResolution()) null else r.accessToken
+              } catch (e: Exception) { null }
+          }
+          SBEOF
+          mkdir -p app/src/main/java/com/streambox/app
+          cat > app/src/main/java/com/streambox/app/PlayerActivity.kt <<'SBEOF'
+          package com.streambox.app
+
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Context
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.Gravity
+          import android.view.View
+          import android.view.WindowManager
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.SeekBar
+          import android.widget.TextView
+          import android.widget.Toast
+          import org.json.JSONObject
+          import org.videolan.libvlc.LibVLC
+          import org.videolan.libvlc.Media
+          import org.videolan.libvlc.MediaPlayer
+          import org.videolan.libvlc.util.VLCVideoLayout
+
+          class PlayerActivity : Activity() {
+              private lateinit var vlc: LibVLC
+              private lateinit var mp: MediaPlayer
+              private lateinit var layout: VLCVideoLayout
+              private lateinit var ui: LinearLayout
+              private lateinit var titleV: TextView
+              private lateinit var timeV: TextView
+              private lateinit var playV: TextView
+              private lateinit var speedV: TextView
+              private lateinit var seek: SeekBar
+              private lateinit var px: Proxy
+              private val ids = ArrayList<String>()
+              private val names = ArrayList<String>()
+              private var idx = 0
+              private var token = ""
+              private var length = 0L
+              private var dragging = false
+              private var started = false
+              private var failed = false
+              private var lastSave = 0L
+              private var si = 0
+              private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 2f, 0.75f)
+              private val h = Handler(Looper.getMainLooper())
+              private val hide = Runnable { ui.visibility = View.GONE }
+
+              private fun tv(t: String, sp: Float = 20f, click: (() -> Unit)? = null): TextView {
+                  val v = TextView(this)
+                  v.text = t
+                  v.textSize = sp
+                  v.setTextColor(Color.WHITE)
+                  v.setPadding(28, 16, 28, 16)
+                  v.gravity = Gravity.CENTER
+                  if (click != null) v.setOnClickListener { click(); showUi() }
+                  return v
+              }
+
+              private fun showUi() {
+                  ui.visibility = View.VISIBLE
+                  h.removeCallbacks(hide)
+                  h.postDelayed(hide, 5000)
+              }
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  val j = JSONObject(intent.getStringExtra("data") ?: "{}")
+                  token = j.optString("token")
+                  px = Proxy(this, j.optString("email"), token)
+                  px.start()
+                  idx = j.optInt("index")
+                  val arr = j.getJSONArray("items")
+                  for (i in 0 until arr.length()) {
+                      val o = arr.getJSONObject(i)
+                      ids.add(o.getString("id"))
+                      names.add(o.getString("name"))
+                  }
+                  vlc = LibVLC(this, arrayListOf("--http-reconnect", "--network-caching=3000"))
+                  mp = MediaPlayer(vlc)
+                  layout = VLCVideoLayout(this)
+                  val root = FrameLayout(this)
+                  root.setBackgroundColor(Color.BLACK)
+                  root.addView(layout, FrameLayout.LayoutParams(-1, -1))
+
+                  ui = LinearLayout(this)
+                  ui.orientation = LinearLayout.VERTICAL
+                  ui.setBackgroundColor(0x77000000)
+                  titleV = tv("", 16f)
+                  titleV.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                  playV = tv("▶", 34f) { if (mp.isPlaying()) mp.pause() else mp.play() }
+                  val mid = LinearLayout(this)
+                  mid.gravity = Gravity.CENTER
+                  mid.addView(tv("⟲ 10", 18f) { mp.setTime(maxOf(0L, mp.getTime() - 10000L)) })
+                  mid.addView(playV)
+                  mid.addView(tv("10 ⟳", 18f) { mp.setTime(mp.getTime() + 10000L) })
+                  seek = SeekBar(this)
+                  seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                          if (fromUser) mp.setTime(p.toLong())
+                      }
+                      override fun onStartTrackingTouch(s: SeekBar?) { dragging = true }
+                      override fun onStopTrackingTouch(s: SeekBar?) { dragging = false; showUi() }
+                  })
+                  timeV = tv("0:00 / 0:00", 14f)
+                  speedV = tv("1x", 16f) {
+                      si = (si + 1) % speeds.size
+                      mp.setRate(speeds[si])
+                      speedV.text = speeds[si].toString() + "x"
+                  }
+                  val row = LinearLayout(this)
+                  row.gravity = Gravity.CENTER_VERTICAL
+                  row.addView(timeV, LinearLayout.LayoutParams(0, -2, 1f))
+                  row.addView(tv("Audio", 16f) { pick("Audio track", mp.getAudioTracks(), mp.getAudioTrack()) { mp.setAudioTrack(it) } })
+                  row.addView(tv("Subtitles", 16f) { pick("Subtitles", mp.getSpuTracks(), mp.getSpuTrack()) { mp.setSpuTrack(it) } })
+                  row.addView(tv("Next", 16f) { if (idx < ids.size - 1) open(idx + 1) })
+                  row.addView(speedV)
+                  ui.addView(titleV)
+                  ui.addView(mid, LinearLayout.LayoutParams(-1, 0, 1f))
+                  ui.addView(seek)
+                  ui.addView(row)
+                  ui.setOnClickListener { ui.visibility = View.GONE }
+                  root.addView(ui, FrameLayout.LayoutParams(-1, -1))
+                  root.setOnClickListener { showUi() }
+                  setContentView(root)
+
+                  mp.setEventListener { e ->
+                      when (e.type) {
+                          MediaPlayer.Event.LengthChanged -> {
+                              length = e.lengthChanged
+                              seek.max = length.toInt()
+                          }
+                          MediaPlayer.Event.TimeChanged -> {
+                              val t = e.timeChanged
+                              if (!dragging) seek.progress = t.toInt()
+                              timeV.text = fmt(t) + " / " + fmt(length)
+                              val now = System.currentTimeMillis()
+                              if (now - lastSave > 5000) { lastSave = now; savePos() }
+                          }
+                          MediaPlayer.Event.Playing -> playV.text = "❚❚"
+                          MediaPlayer.Event.Paused -> playV.text = "▶"
+                          MediaPlayer.Event.EndReached -> {
+                              clearPos()
+                              if (idx < ids.size - 1) open(idx + 1) else finish()
+                          }
+                          MediaPlayer.Event.EncounteredError -> fail()
+                      }
+                  }
+                  showUi()
+              }
+
+              private fun pick(title: String, tracks: Array<MediaPlayer.TrackDescription>?, cur: Int, set: (Int) -> Unit) {
+                  if (tracks == null || tracks.isEmpty()) {
+                      Toast.makeText(this, "No tracks found", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  val labels = tracks.map { (if (it.id == cur) "✓ " else "    ") + it.name }.toTypedArray()
+                  AlertDialog.Builder(this).setTitle(title).setItems(labels) { _, w -> set(tracks[w].id) }.show()
+              }
+
+              private fun open(i: Int) {
+                  idx = i
+                  titleV.text = names[i]
+                  length = 0L
+                  seek.progress = 0
+                  val id = ids[i]
+                  val url = "http://127.0.0.1:" + px.port + "/" + id
+                  val m = Media(vlc, Uri.parse(url))
+                  m.setHWDecoderEnabled(true, false)
+                  val p = getSharedPreferences("pos", Context.MODE_PRIVATE).getLong(id, 0L)
+                  if (p > 15000L) m.addOption(":start-time=" + (p / 1000L))
+                  mp.setMedia(m)
+                  m.release()
+                  mp.play()
+              }
+
+              private fun savePos() {
+                  if (ids.isEmpty() || length <= 0L) return
+                  val t = mp.getTime()
+                  getSharedPreferences("pos", Context.MODE_PRIVATE).edit()
+                      .putLong(ids[idx], if (t < length - 30000L) t else 0L).apply()
+              }
+
+              private fun clearPos() {
+                  getSharedPreferences("pos", Context.MODE_PRIVATE).edit().remove(ids[idx]).apply()
+              }
+
+              private fun fail() {
+                  if (failed) return
+                  failed = true
+                  AlertDialog.Builder(this)
+                      .setMessage(failMsg())
+                      .setPositiveButton("OK") { _, _ -> finish() }
+                      .setCancelable(false)
+                      .show()
+              }
+
+              private fun failMsg(): String = when {
+                  px.lastError.isNotEmpty() -> "Drive refused the stream: " + px.lastError + "\n\nIf this says 401, sign in again."
+                  px.ok -> "The stream opened but the player could not play this file."
+                  else -> "Could not reach the stream. Check your connection or sign in again."
+              }
+
+              private fun fmt(ms: Long): String {
+                  val s = ms / 1000
+                  val hh = s / 3600
+                  val mm = (s % 3600) / 60
+                  val ss = s % 60
+                  return if (hh > 0) "%d:%02d:%02d".format(hh, mm, ss) else "%d:%02d".format(mm, ss)
+              }
+
+              override fun onStart() {
+                  super.onStart()
+                  mp.attachViews(layout, null, true, false)
+                  if (!started) { started = true; open(idx) } else mp.play()
+              }
+
+              override fun onStop() {
+                  super.onStop()
+                  savePos()
+                  mp.pause()
+                  mp.detachViews()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  h.removeCallbacksAndMessages(null)
+                  mp.release()
+                  vlc.release()
+                  px.stop()
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onWindowFocusChanged(f: Boolean) {
+                  super.onWindowFocusChanged(f)
+                  if (f) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                      View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                      View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                      View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+              }
+          }
+
+          class Proxy(private val act: android.app.Activity, private val email: String, first: String) {
+              @Volatile private var token = first
+              private var issued = System.currentTimeMillis()
+              private val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+              val port: Int get() = server.localPort
+              @Volatile var lastError = ""
+              @Volatile var ok = false
+
+              fun start() {
+                  Thread {
+                      while (!server.isClosed) {
+                          try {
+                              val c = server.accept()
+                              Thread { handle(c) }.start()
+                          } catch (e: Exception) { break }
+                      }
+                  }.start()
+              }
+
+              fun stop() {
+                  try { server.close() } catch (e: Exception) { }
+              }
+
+              private fun fresh(): Boolean {
+                  val t = Auth.blocking(act, email) ?: return false
+                  token = t
+                  issued = System.currentTimeMillis()
+                  return true
+              }
+
+              private fun connect(id: String, range: String?): java.net.HttpURLConnection {
+                  val h = java.net.URL("https://www.googleapis.com/drive/v3/files/" + id + "?alt=media&supportsAllDrives=true").openConnection() as java.net.HttpURLConnection
+                  h.setRequestProperty("Authorization", "Bearer " + token)
+                  h.setRequestProperty("Accept-Encoding", "identity")
+                  if (range != null) h.setRequestProperty("Range", range)
+                  h.connectTimeout = 15000
+                  h.readTimeout = 30000
+                  return h
+              }
+
+              private fun handle(c: java.net.Socket) {
+                  try {
+                      c.use {
+                          val inp = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                          val first = inp.readLine() ?: return
+                          val parts = first.split(" ")
+                          var range: String? = null
+                          while (true) {
+                              val l = inp.readLine() ?: break
+                              if (l.isEmpty()) break
+                              if (l.startsWith("Range:", true)) range = l.substring(6).trim()
+                          }
+                          val id = parts[1].trimStart('/').substringBefore('?')
+                          if (email.isNotEmpty() && System.currentTimeMillis() - issued > 2700000L) fresh()
+                          var h = connect(id, range)
+                          var code = h.responseCode
+                          if (code == 401 && email.isNotEmpty() && fresh()) {
+                              h = connect(id, range)
+                              code = h.responseCode
+                          }
+                          val out = c.getOutputStream().buffered(65536)
+                          if (code >= 400) {
+                              val msg = (h.errorStream?.bufferedReader()?.readText() ?: "").take(300)
+                              lastError = "HTTP " + code + " " + msg
+                              val body = lastError.toByteArray()
+                              out.write(("HTTP/1.1 " + code + " Error\r\nContent-Length: " + body.size + "\r\nConnection: close\r\n\r\n").toByteArray())
+                              out.write(body)
+                              out.flush()
+                              return
+                          }
+                          ok = true
+                          val sb = StringBuilder("HTTP/1.1 " + code + (if (code == 206) " Partial Content" else " OK") + "\r\n")
+                          for (k in listOf("Content-Type", "Content-Length", "Content-Range")) {
+                              val v = h.getHeaderField(k)
+                              if (v != null) sb.append(k + ": " + v + "\r\n")
+                          }
+                          sb.append("Accept-Ranges: bytes\r\nConnection: close\r\n\r\n")
+                          out.write(sb.toString().toByteArray())
+                          if (parts[0] != "HEAD") h.inputStream.use { it.copyTo(out, 65536) }
+                          out.flush()
+                      }
+                  } catch (e: Exception) { }
+              }
+          }
+          SBEOF
+      - name: Use fixed debug signing key
+        run: |
+          mkdir -p ~/.android
+          echo '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' | base64 -d > ~/.android/debug.keystore
+      - name: Add app icon
+        run: |
+          mkdir -p app/src/main/res/mipmap-xxxhdpi app/src/main/res/mipmap-anydpi-v26 app/src/main/res/values
+          echo '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' | base64 -d > app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          echo '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' | base64 -d > app/src/main/res/mipmap-xxxhdpi/ic_fg.png
+          cat > app/src/main/res/values/colors.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources><color name="ic_bg">#000000</color></resources>
+          SBEOF
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'SBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_bg" />
+              <foreground android:drawable="@mipmap/ic_fg" />
+          </adaptive-icon>
+          SBEOF
+          sed -i 's|<application|<application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"|' app/src/main/AndroidManifest.xml
+      - name: Build APK
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace || { sed -i 's/libvlc-all:3.6.0/libvlc-all:3.5.1/' app/build.gradle; gradle assembleDebug --no-daemon --stacktrace; }
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: StreamBox APK ${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
