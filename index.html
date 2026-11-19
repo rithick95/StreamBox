@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="StreamBox">
+<title>StreamBox</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{--bg:#0a0f1c;--panel:#141b2e;--line:#243049;--text:#eef1f8;--mut:#8f9bb5;--acc:#ff3d57}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html{overflow-x:hidden}html,body{background:var(--bg);color:var(--text);font:15px/1.4 "Segoe UI",Roboto,system-ui,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+nav{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:14px;padding:12px 4vw;padding-top:calc(12px + env(safe-area-inset-top,0px));background:linear-gradient(#0a0f1ce6,#0a0f1c00)}
+.lg{height:36px;width:auto;display:block}.logo{font-weight:800;font-size:20px;letter-spacing:-.5px;color:var(--text)}
+#q{flex:1;min-width:0;width:100%;max-width:340px;margin-left:auto;background:#ffffff14;border:1px solid var(--line);border-radius:20px;color:var(--text);padding:8px 14px;outline:0}
+#q:focus{border-color:var(--acc)}
+.ib{font-size:20px;padding:4px 8px}
+#hero{position:relative;min-height:62vh;display:flex;align-items:flex-end;padding:0 4vw 6vh;background:#141b2e center/cover}
+#hero:after{content:"";position:absolute;inset:0;background:linear-gradient(to top,var(--bg) 4%,#0a0f1c40 60%,#0a0f1c99)}
+#hero>div{position:relative;z-index:1;max-width:560px}
+#hero h1{font-size:clamp(28px,6vw,54px);line-height:1.05;margin-bottom:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border-radius:6px;font-weight:700;background:#fff;color:#000}
+.btn.acc{background:var(--acc);color:#fff}
+.row{padding:8px 0 4px}
+.row h2{font-size:18px;padding:0 4vw 8px}
+.track{display:flex;gap:8px;overflow-x:auto;padding:0 4vw 10px;scroll-snap-type:x proximity;scrollbar-width:none}
+.track::-webkit-scrollbar{display:none}
+.card{flex:0 0 auto;width:clamp(128px,17vw,230px);aspect-ratio:2/3;border-radius:6px;background:var(--panel) center/cover;position:relative;overflow:hidden;scroll-snap-align:start;transition:transform .15s;text-align:left}
+.card:hover{transform:scale(1.05);z-index:2}
+.card .t{position:absolute;inset:auto 0 0;padding:26px 8px 8px;font-size:13px;font-weight:600;background:linear-gradient(transparent,#000d);overflow:hidden;max-height:60%}
+.card .k{position:absolute;top:6px;right:6px;background:#000a;border-radius:4px;padding:1px 6px;font-size:11px}
+.card .pg{position:absolute;left:0;bottom:0;height:3px;background:var(--acc)}
+.wide .card{aspect-ratio:16/9;width:clamp(180px,24vw,300px)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:20px;width:min(520px,92vw);max-height:84vh;overflow:auto}
+dialog::backdrop{background:#000b}
+dialog h3{margin-bottom:12px}
+dialog label{display:block;margin:10px 0 4px;color:var(--mut);font-size:13px}
+dialog input{width:100%;padding:10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.ep{display:flex;gap:12px;align-items:center;width:100%;padding:10px 6px;border-bottom:1px solid var(--line);text-align:left}
+.ep:hover{background:#ffffff0d}.ep b{color:var(--mut);width:28px}
+#msg{padding:30vh 6vw;text-align:center;color:var(--mut)}
+#msg.err{color:#ff8a98}
+/* player */
+#pl{position:fixed;inset:0;z-index:20;background:#000;display:none;touch-action:manipulation}
+#pl.on{display:block}
+#v{width:100%;height:100%;background:#000}
+#ui{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(#000a,#0000 25%,#0000 60%,#000c);transition:opacity .25s;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+#pl.hide #ui{opacity:0;pointer-events:none}#pl.hide{cursor:none}
+.top{display:flex;align-items:center;gap:12px;padding:14px 18px;font-weight:600;font-size:17px}
+.top button{font-size:26px}.top span{font-size:15px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.dh{display:flex;align-items:center;gap:6px;margin-bottom:10px}.dh h3{flex:1;margin:0;font-size:16px}.dh button{font-size:22px;padding:4px 10px}
+.mid{display:flex;justify-content:center;align-items:center;gap:7vw}
+.mid button{font-size:15px;width:56px;height:56px;border-radius:50%;background:#0006;border:1px solid #fff4}
+.mid #pp{width:76px;height:76px;font-size:30px;background:#ffffff26}
+.bot{padding:0 18px 14px}
+#sk{width:100%;height:6px;-webkit-appearance:none;appearance:none;border-radius:3px;outline:0;margin:6px 0;cursor:pointer}
+#sk::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--acc)}
+#sk::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:var(--acc)}
+.ctl{display:flex;align-items:center;gap:8px;font-size:14px}
+.ctl button{font-size:19px;padding:6px 8px}
+.ctl .sp{flex:1}
+#vo{width:80px;accent-color:var(--acc)}
+#spin{position:absolute;top:50%;left:50%;width:46px;height:46px;margin:-23px;border:4px solid #fff3;border-top-color:var(--acc);border-radius:50%;animation:r 1s linear infinite;display:none;pointer-events:none}
+#pl.wait #spin{display:block}
+@keyframes r{to{transform:rotate(1turn)}}
+#perr{z-index:3;position:absolute;inset:auto 6vw 30vh;text-align:center;color:#ff8a98;display:none}
+#toast{position:absolute;top:18%;left:50%;transform:translateX(-50%);background:#000a;padding:6px 14px;border-radius:20px;opacity:0;transition:opacity .2s;pointer-events:none}
+#gf{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:2;display:none}#gb{display:none;position:absolute;z-index:4;top:calc(10px + env(safe-area-inset-top,0px));left:10px;font-size:24px;background:#000a;border-radius:50%;width:44px;height:44px}.gmode #gf,.gmode #gb{display:block}.gmode #ui,.gmode #toast,.gmode #spin,.gmode #v{display:none}#art{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:96px;color:#fff3;background:radial-gradient(#2a1a3a,#000);pointer-events:none}.aud #art{display:flex}
+div.ep{cursor:pointer}dialog select{width:100%;padding:10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text)}#am{display:none;position:absolute;z-index:5;right:14px;bottom:96px;background:#141b2ef5;border:1px solid var(--line);border-radius:10px;padding:6px;width:min(300px,calc(100vw - 28px));max-height:60vh;overflow:auto}#am.on{display:block}#am button{display:block;width:100%;text-align:left;padding:11px 12px;border-radius:6px;font-size:14px}#am button:hover{background:#ffffff14}#am small{display:block;color:var(--mut);padding:6px 12px;font-size:12px}.hide #am,.gmode #am{display:none}#gn{display:none;position:absolute;z-index:4;left:12px;right:12px;top:calc(64px + env(safe-area-inset-top,0px));background:#000d;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}#gn.on{display:block}
+html.app .cidf{display:none}.row h2{display:flex;justify-content:space-between;align-items:center}.sa{font-size:13px;color:var(--mut);font-weight:400}
+#bw{padding:calc(68px + env(safe-area-inset-top,0px)) 4vw 28px}.bh{display:flex;align-items:center;gap:6px}.bh>button{font-size:22px;padding:6px 10px}.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;color:var(--mut);font-size:14px;min-width:0}.cr{padding:4px 6px;border-radius:6px;color:var(--text);text-align:left}.cr:last-child{font-weight:700}
+.bt{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:12px 0}.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg button{padding:7px 12px;font-size:14px;color:var(--mut)}.seg button.on{background:var(--acc);color:#fff}#bs{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
+.gr{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}.gr .card{width:100%}.ls{display:flex;flex-direction:column;gap:2px}.lr{display:flex;align-items:center;gap:12px;padding:8px;border-radius:8px;text-align:left;width:100%}.lr:hover{background:#ffffff0d}.lr .th{flex:0 0 auto;width:96px;aspect-ratio:16/9;border-radius:6px;background:var(--panel) center/cover;display:grid;place-items:center;font-size:26px}.lr .tt{flex:1;min-width:0;font-weight:600}.lr .tt small{display:block;color:var(--mut);font-weight:400;font-size:12px}.lr .go{color:var(--mut);font-size:20px;padding:0 8px}
+@media(max-width:640px){.ctl{gap:2px}.ctl button{padding:6px 5px}nav{gap:8px}.logo{display:none}#hero{min-height:52vh}.row h2{font-size:16px}#vo{display:none}.mid button{width:48px;height:48px}.mid #pp{width:64px;height:64px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head><body>
+<nav><img class="lg" src="logo.png" alt="StreamBox"><span class="logo">StreamBox</span><input id="q" type="search" placeholder="Search movies, anime…"><button class="ib" id="bro" aria-label="Browse folders">📁</button><button class="ib" id="gear" aria-label="Settings">⚙</button></nav>
+<main id="app"></main>
+
+<dialog id="set"><h3>Connect your Google Drive</h3>
+<p style="color:var(--mut);font-size:13px">You sign in with your Google account (read-only access to Drive). Paste your Google OAuth Client ID once; it stays in this browser only.</p>
+<label class="cidf">Google OAuth Client ID</label><input class="cidf" id="cid" autocomplete="off" placeholder="1234-abc.apps.googleusercontent.com">
+<label>Google accounts (tap one to switch)</label><div id="acc"></div><p style="margin:8px 0"><button class="btn" style="background:var(--line);color:var(--text)" onclick="signIn(null,true)">+ Add Gmail account</button></p>
+<label>Folder link or ID for the selected account (empty = everything shared with you)</label><input id="fold" autocomplete="off">
+<label>If the app can’t play a file</label><select id="fb"><option value="google">Use Google’s player</option><option value="ext">Open in VLC / MX Player (Android)</option></select>
+<p style="margin-top:16px"><button class="btn acc" id="save">Save &amp; load</button> <button class="btn" id="inst" style="display:none;background:var(--line);color:var(--text)">Install app</button> <button class="btn" style="background:var(--line);color:var(--text)" onclick="$('#set').close();signOut()">Sign out</button> <button class="btn" style="background:var(--line);color:var(--text)" onclick="$('#set').close()">Close</button></p></dialog>
+<dialog id="eps"><div class="dh"><button id="eb" aria-label="Back">←</button><h3 id="et"></h3><button id="ex" aria-label="Close">✕</button></div><div id="el"></div></dialog>
+
+<div id="pl"><video id="v" playsinline></video><div id="art">♪</div><div id="spin"></div><div id="toast"></div><div id="perr"></div><iframe id="gf" allow="autoplay; fullscreen" allowfullscreen></iframe><button id="gb" aria-label="Back">←</button><div id="am"></div><div id="gn"></div>
+<div id="ui">
+ <div class="top"><button id="bk" aria-label="Back">←</button><span id="pt"></span></div>
+ <div class="mid"><button id="rw" aria-label="Back 10 seconds">⟲ 10</button><button id="pp" aria-label="Play or pause">▶</button><button id="ff" aria-label="Forward 10 seconds">10 ⟳</button></div>
+ <div class="bot"><input id="sk" type="range" min="0" max="1000" value="0">
+  <div class="ctl"><span id="tm">0:00 / 0:00</span><span class="sp"></span><button id="au" aria-label="Audio and other players">🎧</button><button id="gp" title="Not working? Play with Google’s player" aria-label="Play with Google player">🌐</button><button id="nx">⏭</button><button id="vm">🔊</button><input id="vo" type="range" min="0" max="1" step=".05" value="1"><button id="sd">1×</button><button id="fs">⛶</button></div></div>
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s),LS=localStorage;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cfg=()=>JSON.parse(LS.sc||'{}');
+const isF=f=>f.mimeType==='application/vnd.google-apps.folder';
+const isA=f=>/^audio\//.test(f.mimeType)||/\.(mp3|m4a|aac|flac|ogg|opus|wav|wma)$/i.test(f.name);
+const isV=f=>/^(video|audio)\//.test(f.mimeType)||/\.(mp4|mkv|webm|mov|m4v|avi|wmv|flv|ts|m2ts|3gp|mpg|mpeg|mp3|m4a|aac|flac|ogg|opus|wav|wma)$/i.test(f.name);
+const title=n=>{n=n.replace(/\.[a-z0-9]{2,4}$/i,'').replace(/^copy of\s+/i,'').replace(/\[[^\]]*\]/g,' ').replace(/[._]+/g,' ');const i=n.search(/\b(480p|720p|1080p|2160p|4k|hevc|x26[45]|h26[45]|bluray|blu-ray|web-?dl|webrip|hdrip|dvdrip)\b/i);if(i>2)n=n.slice(0,i);return n.replace(/\s+/g,' ').trim()||'Untitled'};
+const nat=(a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true});
+let ACC=JSON.parse(LS.accts||'[]'),AI=+LS.act||0;
+const cur=()=>ACC[AI]||null,saveA=()=>{LS.accts=JSON.stringify(ACC);LS.act=AI},expired=()=>!cur()||Date.now()>cur().atx;
+let AT=cur()&&cur().atx>Date.now()?cur().at:'';
+const src=id=>`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true&access_token=${AT}`;
+let pendingCb=null,autoTry=0;
+async function acceptToken(tk,ex,cb){
+  try{const u=(await(await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',{headers:{Authorization:'Bearer '+tk}})).json()).user;
+    let i=ACC.findIndex(a=>a.email===u.emailAddress);if(i<0){ACC.push({email:u.emailAddress,folder:ACC.length?'':(cfg().folder||'')});i=ACC.length-1}
+    Object.assign(ACC[i],{at:tk,atx:ex});AI=i}catch(e){alert('Could not read your Google account: '+e.message);return}
+  autoTry=0;AT=tk;saveA();if($('#set').open)renderAcc();cb?cb():load()}
+window.nativeToken=(t,sec)=>{const cb=pendingCb;pendingCb=null;acceptToken(t,Date.now()+(sec-120)*1000,cb)};
+window.nativeAuthError=m=>{autoTry=1;pendingCb=null;$('#app').innerHTML=`<div id="msg" class="err">Sign-in problem: ${esc(m)}<br><br><button class="btn acc" onclick="autoTry=0;signIn(null,true)">Pick Google account</button></div>`};
+function signIn(cb,add){
+  if(!cfg().cid&&!window.Android){alert('Add your Google Client ID in Settings first.');return}
+  const c=cur();
+  if(window.Android){pendingCb=cb||null;Android.signIn((!add&&c)?c.email:'');return}
+  if(!window.google){alert('Google sign-in is still loading. Check your connection.');return}
+  google.accounts.oauth2.initTokenClient({client_id:cfg().cid,scope:'https://www.googleapis.com/auth/drive.readonly',
+    callback:r=>{if(r.access_token)acceptToken(r.access_token,Date.now()+(r.expires_in-120)*1000,cb)}}).requestAccessToken(add||!c?{prompt:'select_account'}:{prompt:'',hint:c.email})}
+const signOut=()=>{if(ACC.length){ACC.splice(AI,1);AI=0;saveA()}AT=cur()&&cur().atx>Date.now()?cur().at:'';load()};
+async function list(id){
+  let out=[],tok='';
+  do{const u=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(id==='shared'?'sharedWithMe=true and trashed=false':`'${id}' in parents and trashed=false`)}&supportsAllDrives=true&includeItemsFromAllDrives=true&pageSize=1000&fields=nextPageToken,files(id,name,mimeType,thumbnailLink,modifiedTime)${tok?'&pageToken='+tok:''}`;
+    const r=await fetch(u,{headers:{Authorization:'Bearer '+AT}});if(r.status===401){AT='';if(cur()){cur().atx=0;saveA()}throw new Error('Your Google session expired. Sign in again.')}if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'Drive error '+r.status)}
+    const j=await r.json();out.push(...j.files);tok=j.nextPageToken}while(tok);
+  return out.sort(nat)}
+const thumb=f=>f.thumbnailLink?f.thumbnailLink.replace(/=s\d+$/,'=s500'):'';
+let rows=[],items={};
+function card(f,wide){items[f.id]=f;const p=LS['pos:'+f.id]?JSON.parse(LS['pos:'+f.id]):null;
+  return `<button class="card" data-id="${f.id}" data-n="${esc(title(f.name)).toLowerCase()}" style="${thumb(f)?`background-image:url('${thumb(f)}')`:''}">${isF(f)?'<span class="k">Series</span>':''}<span class="t">${esc(title(f.name))}</span>${p&&p.d?`<span class="pg" style="width:${Math.min(100,p.t/p.d*100)}%"></span>`:''}</button>`}
+async function load(){
+  const c=cfg();fc={};nav=[];if(!c.cid&&!window.Android){$('#app').innerHTML='<div id="msg">Add your Google Client ID to start.<br><br><button class="btn acc" onclick="$(\'#set\').showModal()">Set up</button></div>';return}
+  if(!AT&&window.Android&&cur()&&!autoTry){autoTry=1;$('#app').innerHTML='<div id="msg">Signing in…</div>';signIn();return}
+  if(!AT){$('#app').innerHTML=`<div id="msg">${cur()?'Continue as '+esc(cur().email):'Sign in to stream your library.'}<br><br><button class="btn acc" onclick="signIn()">${cur()?'Continue':'Sign in with Google'}</button> <button class="btn" onclick="signIn(null,true)">Use another account</button></div>`;return}
+  $('#app').innerHTML='<div id="msg">Loading your library…</div>';
+  try{rootId=(cur()&&cur().folder)||'shared';const root=await list(rootId);rows=[];items={};
+    const loose=root.filter(isV);if(loose.length)rows.push({name:'Movies',list:loose,id:rootId});
+    const dirs=root.filter(isF),ls=await Promise.all(dirs.map(d=>list(d.id).catch(()=>[])));
+    dirs.forEach((d,i)=>{const vs=ls[i].filter(f=>isV(f)||isF(f));if(vs.length)rows.push({name:title(d.name),list:vs,id:d.id})});
+    render()}catch(e){$('#app').innerHTML=`<div id="msg" class="err">Couldn’t load: ${esc(e.message)}<br><br>Make sure the Drive API is enabled and your Google account can open this folder.<br><br><button class="btn acc" onclick="signIn()">Sign in again</button> <button class="btn" onclick="$('#set').showModal()">Settings</button></div>`}}
+function render(){
+  const all=rows.flatMap(r=>r.list);if(!all.length){$('#app').innerHTML='<div id="msg">No videos found in that folder.</div>';return}
+  const hero=all.filter(thumb)[Math.floor(Math.random()*all.filter(thumb).length)]||all[0];
+  const rec=JSON.parse(LS.recent||'[]').filter(id=>items[id]);
+  let h=`<section id="hero" style="${thumb(hero)?`background-image:url('${thumb(hero).replace(/=s\d+$/,'=s1600')}')`:''}"><div><h1>${esc(title(hero.name))}</h1><button class="btn" data-id="${hero.id}">▶ ${isF(hero)?'Browse episodes':'Play'}</button></div></section>`;
+  if(rec.length)h+=`<section class="row wide"><h2>Continue watching</h2><div class="track">${rec.map(id=>card(items[id])).join('')}</div></section>`;
+  h+=rows.map((r,i)=>`<section class="row"><h2>${esc(r.name)}<button class="sa" data-see="${i}">See all ›</button></h2><div class="track">${r.list.map(f=>card(f)).join('')}</div></section>`).join('');
+  $('#app').innerHTML=h;posters()}
+function refresh(){nav.length?drawBrowse():render()}
+let nav=[],hp=0,reuse=false,view=LS.view||'grid',sort=LS.sort||'az',rootId='',curVids=[],fc={};
+const hpush=()=>{history.pushState({sb:1},'');hp++};
+const cmp=(a,b)=>title(a.name).localeCompare(title(b.name),undefined,{numeric:true,sensitivity:'base'});
+const srt=l=>{const a=[...l];if(sort==='za')a.sort((x,y)=>cmp(y,x));else if(sort==='new')a.sort((x,y)=>(y.modifiedTime||'').localeCompare(x.modifiedTime||''));else a.sort(cmp);return a};
+function lrow(f){items[f.id]=f;const p=LS['pos:'+f.id]?JSON.parse(LS['pos:'+f.id]):null;
+  return `<button class="lr" data-id="${f.id}" data-n="${esc(title(f.name)).toLowerCase()}"><span class="th" style="${thumb(f)?`background-image:url('${thumb(f)}')`:''}">${isF(f)?'📁':''}</span><span class="tt">${esc(title(f.name))}<small>${isF(f)?'Folder':isA(f)?'Audio':'Video'}${p&&p.d?' · '+Math.round(p.t/p.d*100)+'% watched':''}</small></span><span class="go">${isF(f)?'›':'▶'}</span></button>`}
+function openF(f){if(!nav.length)hpush();nav.push(f);drawBrowse()}
+async function drawBrowse(){
+  const f=nav[nav.length-1];if(!f)return;
+  const cr=nav.map((x,i)=>`<button class="cr" data-cr="${i}">${esc(i?title(x.name):'📁 '+title(x.name))}</button>`).join('<span>›</span>');
+  $('#app').innerHTML=`<div id="bw"><div class="bh"><button id="bwb" aria-label="Back">←</button><div class="crumbs">${cr}</div></div><div class="bt"><div class="seg"><button data-v="grid" class="${view==='grid'?'on':''}">▦ Grid</button><button data-v="list" class="${view==='list'?'on':''}">☰ List</button></div><select id="bs"><option value="az">A–Z</option><option value="za">Z–A</option><option value="new">Newest</option></select></div><div id="bl"><div id="msg" style="padding:10vh 0">Loading…</div></div></div>`;
+  $('#bs').value=sort;
+  let all;try{all=fc[f.id]||(fc[f.id]=await list(f.id))}catch(er){$('#bl').innerHTML=`<div id="msg" class="err" style="padding:10vh 0">${esc(er.message)}</div>`;return}
+  if(nav[nav.length-1]!==f)return;
+  const fs=srt(all.filter(isF)),vs=srt(all.filter(isV)),one=x=>view==='grid'?card(x):lrow(x);curVids=vs;
+  $('#bl').innerHTML=(fs.length+vs.length)?`<div class="${view==='grid'?'gr':'ls'}">${fs.map(one).join('')}${vs.map(one).join('')}</div>`:'<div id="msg" style="padding:10vh 0">Nothing playable here.</div>';
+  const q=$('#q').value;if(q)$('#q').oninput({target:$('#q')});
+  posters()}
+const upOne=()=>{if(nav.length>1){nav.pop();drawBrowse()}else if(hp)history.back();else{nav=[];render()}};
+$('#app').onclick=e=>{const t=e.target;let b;
+  if(b=t.closest('[data-v]')){view=LS.view=b.dataset.v;drawBrowse();return}
+  if(b=t.closest('[data-cr]')){nav=nav.slice(0,+b.dataset.cr+1);drawBrowse();return}
+  if(t.closest('#bwb')){upOne();return}
+  if(b=t.closest('[data-see]')){const r=rows[+b.dataset.see];nav=[];openF({id:r.id,name:r.name});return}
+  if(b=t.closest('[data-id]')){const f=items[b.dataset.id];if(!f)return;
+    if(isF(f))openF(f);
+    else if(nav.length)play(curVids,Math.max(0,curVids.indexOf(f)));
+    else{const row=rows.find(r=>r.list.includes(f)),vs=row?row.list.filter(isV):[f];play(vs,Math.max(0,vs.indexOf(f)))}}};
+$('#app').onchange=e=>{if(e.target.id==='bs'){sort=LS.sort=e.target.value;drawBrowse()}};
+$('#bro').onclick=()=>{if(!AT||nav.length)return;nav=[];openF({id:rootId||'shared',name:'Library'})};
+/* posters from free public databases (cached on this device) */
+const PK=/^(movies?|anime|series|shows?|tv|cartoons?|videos?|films?|season\s*\d*|s\d+|specials?|extras?|library|new folder)$/i;
+const pcl=t=>t.replace(/\bS\d+(E\d+)?\b.*$/i,'').replace(/\bseason\s*\d+.*$/i,'').replace(/\(\d{4}\)/g,'').replace(/\s+/g,' ').trim();
+const nz=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const same=(a,b)=>{a=nz(a);b=nz(b);return a&&b&&(a.includes(b)||b.includes(a))};
+async function pfetch(name,folder){
+  const J=async u=>{const r=await fetch(u);if(!r.ok)throw 0;return r.json()},q=encodeURIComponent(name);
+  const src={
+    jikan:async()=>{const d=(await J('https://api.jikan.moe/v4/anime?limit=3&q='+q)).data||[];const m=d.find(x=>[x.title,x.title_english].some(t=>same(t,name)));return m&&m.images.jpg.large_image_url},
+    tvmaze:async()=>{const d=await J('https://api.tvmaze.com/search/shows?q='+q);const m=d.find(x=>same(x.show.name,name)&&x.show.image);return m&&(m.show.image.original||m.show.image.medium||'').replace('http://','https://')},
+    itunes:async()=>{const d=(await J('https://itunes.apple.com/search?media=movie&limit=3&term='+q)).results||[];const m=d.find(x=>same(x.trackName,name));return m&&m.artworkUrl100&&m.artworkUrl100.replace('100x100bb','400x600bb')}};
+  for(const k of folder?['jikan','tvmaze','itunes']:['itunes','jikan','tvmaze']){try{const u=await src[k]();if(u)return u}catch(e){}}
+  return ''}
+let pRun=0;
+async function posters(){
+  const run=++pRun;
+  for(const el of document.querySelectorAll('.card[data-id],.lr[data-id]')){
+    if(run!==pRun)return;
+    const f=items[el.dataset.id];if(!f||!document.contains(el))continue;
+    if(!isF(f)&&(nav.length||/\bS\d+E\d+\b|\bEP?\s?\d{2,}\b|episode/i.test(f.name)))continue;
+    const name=pcl(title(f.name));if(!name||PK.test(name))continue;
+    const key='pst:'+name.toLowerCase();let u=LS[key];
+    if(u===undefined){await new Promise(r=>setTimeout(r,380));if(run!==pRun)return;u=(await pfetch(name,isF(f)))||'-';try{LS[key]=u}catch(e){}}
+    if(u!=='-'){const t=el.classList.contains('lr')?el.querySelector('.th'):el;t.style.backgroundImage=`url('${u}')`}}}
+$('#set').onclick=e=>{if(e.target===$('#set'))$('#set').close()};
+const closeP=()=>hp?history.back():stop();
+addEventListener('popstate',()=>{hp=Math.max(0,hp-1);if(pl.classList.contains('on'))stop();else if(nav.length>1){nav.pop();hpush();drawBrowse()}else if(nav.length===1){nav=[];render()}});
+$('#q').oninput=e=>{const s=e.target.value.toLowerCase().trim();document.querySelectorAll('.card,.lr').forEach(c=>c.style.display=!s||c.dataset.n.includes(s)?'':'none');
+  document.querySelectorAll('.row').forEach(r=>r.style.display=[...r.querySelectorAll('.card')].some(c=>c.style.display!=='none')?'':'none');const hr=$('#hero');if(hr)hr.style.display=s?'none':''};
+function renderAcc(){$('#acc').innerHTML=ACC.length?ACC.map((a,i)=>`<div class="ep" data-a="${i}"><b>${i===AI?'✓':''}</b><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(a.email)}</span><button data-x="${i}" style="color:#ff8a98">Remove</button></div>`).join(''):'<p style="color:var(--mut);font-size:13px">Not signed in yet.</p>';$('#fold').value=cur()?cur().folder||'':(cfg().folder||'')}
+$('#acc').onclick=e=>{const x=e.target.closest('[data-x]'),a=e.target.closest('[data-a]');
+  if(x){const k=+x.dataset.x;ACC.splice(k,1);if(k<AI)AI--;if(AI>=ACC.length)AI=Math.max(0,ACC.length-1)}else if(a)AI=+a.dataset.a;else return;
+  saveA();AT=cur()&&cur().atx>Date.now()?cur().at:'';renderAcc();load()};
+$('#gear').onclick=()=>{$('#cid').value=cfg().cid||'';$('#fb').value=LS.fb||'google';renderAcc();$('#set').showModal()};
+$('#save').onclick=()=>{const m=$('#fold').value.match(/folders\/([\w-]+)/)||$('#fold').value.match(/[?&]id=([\w-]+)/);
+  LS.fb=$('#fb').value;const fv=m?m[1]:$('#fold').value.trim();LS.sc=JSON.stringify({cid:$('#cid').value.trim(),folder:cur()?'':fv});if(cur()){cur().folder=fv;saveA()}$('#set').close();load()};
+/* player */
+const v=$('#v'),pl=$('#pl');let pls=[],pi=0,hideT,saveT,lastTap=0,tapT;
+const fmt=s=>{s=Math.max(0,s|0);const h=s/3600|0,m=(s%3600)/60|0,x=s%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')};
+function play(list,i){
+  if(window.Android){if(expired()){signIn(()=>play(list,i));return}if(reuse){reuse=false;history.back()}
+    const f0=list[i];LS.recent=JSON.stringify([f0.id,...JSON.parse(LS.recent||'[]').filter(x=>x!==f0.id)].slice(0,12));
+    Android.play(JSON.stringify({token:AT,email:cur().email,index:i,items:list.map(x=>({id:x.id,name:title(x.name)}))}));return}
+$('#am').classList.remove('on');$('#gn').classList.remove('on');if(!pl.classList.contains('on')){if(reuse)reuse=false;else hpush()}if(expired()){signIn(()=>play(list,i));return}pls=list;pi=i;const f=pls[i];pl.classList.remove('gmode');$('#gf').src='about:blank';pl.classList.toggle('aud',isA(f));$('#pt').textContent=title(f.name);$('#perr').style.display='none';
+  pl.classList.add('on','wait');document.body.style.overflow='hidden';v.src=src(f.id);
+  const p=LS['pos:'+f.id]?JSON.parse(LS['pos:'+f.id]):null;v.onloadedmetadata=()=>{if(p&&p.t>10&&p.t<v.duration-30)v.currentTime=p.t};
+  v.play().catch(()=>{});if(!isA(f)&&!document.fullscreenElement)goFS();$('#nx').style.display=pls.length>1?'':'none';
+  LS.recent=JSON.stringify([f.id,...JSON.parse(LS.recent||'[]').filter(x=>x!==f.id)].slice(0,12));show();preCheck(f)}
+function stop(){save();v.pause();pl.classList.remove('gmode','aud');$('#gn').classList.remove('on');$('#gf').src='about:blank';v.removeAttribute('src');v.load();pl.classList.remove('on');document.body.style.overflow='';if(document.fullscreenElement)document.exitFullscreen();refresh()}
+function save(){const f=pls[pi];if(f&&v.duration)LS['pos:'+f.id]=JSON.stringify({t:v.currentTime,d:v.duration})}
+function show(){pl.classList.remove('hide');clearTimeout(hideT);hideT=setTimeout(()=>{if(!$('#am').classList.contains('on'))pl.classList.add('hide')},5000)}
+function toast(t){const e=$('#toast');e.textContent=t;e.style.opacity=1;setTimeout(()=>e.style.opacity=0,700)}
+const seek=d=>{v.currentTime=Math.min(v.duration||1e9,Math.max(0,v.currentTime+d));toast((d>0?'+':'')+d+'s');show()};
+const tog=()=>v.paused?v.play():v.pause();
+function next(){if(pi<pls.length-1){save();play(pls,pi+1)}}
+v.onplay=v.onpause=()=>{$('#pp').textContent=v.paused?'▶':'❚❚';show()};
+v.onwaiting=()=>pl.classList.add('wait');v.oncanplay=v.onplaying=()=>pl.classList.remove('wait');
+v.onended=()=>{pi<pls.length-1?next():closeP()};
+v.onerror=()=>{if(!pl.classList.contains('on')||!v.getAttribute('src'))return;pl.classList.remove('wait');const e=$('#perr');e.style.display='block';
+  if(expired()){e.innerHTML='Your Google session expired.<br><br><button class="btn acc" id="rs">Continue watching</button>';const t=v.currentTime;
+    $('#rs').onclick=()=>signIn(()=>{e.style.display='none';pl.classList.add('wait');v.src=src(pls[pi].id);v.onloadedmetadata=()=>{v.currentTime=t};v.play()});return}
+  const c=v.error&&v.error.code;
+  fallback(c===4||c===3?'Your browser can’t decode this file’s video or audio format (common with HEVC 10-bit or MKV files), so another player is used.':c===2?'Drive interrupted or blocked the stream (permission, quota or network), so another player is used.':'This file couldn’t play in the built-in player, so another player is used.')};
+const isAnd=()=>/Android/i.test(navigator.userAgent);
+function fallback(why){const bs=(isAnd()?'<button class="btn" data-a="ext" style="margin:8px 8px 0 0;padding:8px 14px">VLC / MX Player</button>':'')+'<button class="btn" data-a="g" style="margin-top:8px;padding:8px 14px">Google player</button>';
+  note(why+'<br>'+bs);if(LS.fb==='ext'&&isAnd())openExt();else gplay()}
+function preCheck(f){const hev=/hevc|x\.?265|h\.?265/i.test(f.name),ten=/10.?bit|hi10|main10/i.test(f.name);
+  if(hev&&!v.canPlayType(`video/mp4; codecs="${ten?'hvc1.2.4.L93.B0':'hvc1.1.6.L93.B0'}"`)){v.pause();v.removeAttribute('src');fallback('This file uses HEVC'+(ten?' 10-bit':'')+', which your browser can’t decode, so it was sent to another player.')}
+  else if(/\b(ac3|e-?ac-?3|ddp|dd\+|dts|truehd|atmos)\b/i.test(f.name))note('This file may have audio your browser can’t play. If there’s no sound, tap 🎧 for options.<br><button class="btn" data-a="g" style="margin-top:8px;padding:8px 14px">Google player</button>')}
+function note(h){const g=$('#gn');g.innerHTML=h;g.classList.add('on');clearTimeout(note.t);note.t=setTimeout(()=>g.classList.remove('on'),12000)}
+function openExt(){const f=pls[pi];v.pause();location.href=`intent://www.googleapis.com/drive/v3/files/${f.id}?alt=media&supportsAllDrives=true&access_token=${AT}#Intent;scheme=https;action=android.intent.action.VIEW;type=${isA(f)?'audio':'video'}/*;S.title=${encodeURIComponent(title(f.name))};end`}
+$('#gn').onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;if(b.dataset.a==='ext')openExt();else if(b.dataset.a==='g')gplay()};
+function gplay(){v.pause();save();$('#gf').src=`https://drive.google.com/file/d/${pls[pi].id}/preview${cur()?'?authuser='+encodeURIComponent(cur().email):''}`;$('#perr').style.display='none';pl.classList.remove('wait');pl.classList.add('gmode')}
+$('#gp').onclick=gplay;
+$('#au').onclick=()=>{const m=$('#am');if(!m.classList.toggle('on'))return;show();const at=v.audioTracks,h=[];
+  if(at&&at.length>1){h.push('<small>Audio track</small>');for(let i=0;i<at.length;i++){const t=at[i];h.push(`<button data-t="${i}">${t.enabled?'✓ ':'&nbsp;&nbsp;&nbsp;'}${esc(t.label||t.language||'Track '+(i+1))}</button>`)}}
+  else h.push('<small>This browser can’t switch audio tracks inside the page. Use one of these instead:</small>');
+  if(/Android/i.test(navigator.userAgent))h.push('<button data-a="ext">▶ Open in VLC / MX Player (all audio tracks and subtitles)</button>');
+  h.push('<button data-a="copy">⧉ Copy stream link (VLC → Open Network Stream)</button><button data-a="g">🌐 Google player (may list audio options)</button>');m.innerHTML=h.join('')};
+$('#am').onclick=e=>{const b=e.target.closest('button');if(!b)return;const f=pls[pi];
+  if(b.dataset.t!=null){const at=v.audioTracks;for(let i=0;i<at.length;i++)at[i].enabled=(i==b.dataset.t);toast('Audio changed')}
+  else if(b.dataset.a==='ext'){v.pause();location.href=`intent://www.googleapis.com/drive/v3/files/${f.id}?alt=media&supportsAllDrives=true&access_token=${AT}#Intent;scheme=https;action=android.intent.action.VIEW;type=${isA(f)?'audio':'video'}/*;S.title=${encodeURIComponent(title(f.name))};end`}
+  else if(b.dataset.a==='copy'){const u=src(f.id);navigator.clipboard.writeText(u).then(()=>toast('Link copied (valid ~1 hour, keep it private)'),()=>prompt('Copy this link',u))}
+  else if(b.dataset.a==='g')gplay();
+  $('#am').classList.remove('on')};$('#gb').onclick=()=>closeP();
+v.ontimeupdate=()=>{const d=v.duration||0,t=v.currentTime;$('#tm').textContent=fmt(t)+' / '+fmt(d);
+  const pc=d?t/d*100:0,b=d&&v.buffered.length?v.buffered.end(v.buffered.length-1)/d*100:0;$('#sk').value=d?t/d*1000:0;
+  $('#sk').style.background=`linear-gradient(to right,var(--acc) ${pc}%,#fff7 ${pc}% ${b}%,#fff3 ${b}%)`;
+  if(Date.now()-saveT>5000||!saveT){saveT=Date.now();save()}};
+$('#sk').oninput=e=>{show();if(v.duration)v.currentTime=e.target.value/1000*v.duration};
+$('#pp').onclick=tog;$('#rw').onclick=()=>seek(-10);$('#ff').onclick=()=>seek(10);$('#nx').onclick=next;$('#bk').onclick=()=>closeP();
+$('#vo').oninput=e=>{v.volume=e.target.value;v.muted=false};v.onvolumechange=()=>$('#vm').textContent=v.muted||!v.volume?'🔇':'🔊';
+$('#vm').onclick=()=>v.muted=!v.muted;
+const sp=[1,1.25,1.5,2,.5,.75];$('#sd').onclick=()=>{const n=sp[(sp.indexOf(v.playbackRate)+1)%sp.length];v.playbackRate=n;$('#sd').textContent=n+'×'};
+const goFS=()=>{if(document.fullscreenElement){document.exitFullscreen();return}const r=pl.requestFullscreen||pl.webkitRequestFullscreen;
+  if(r)Promise.resolve(r.call(pl)).then(()=>{if(pls[pi]&&!isA(pls[pi])&&screen.orientation&&screen.orientation.lock)return screen.orientation.lock('landscape')}).catch(()=>{})};
+$('#fs').onclick=goFS;
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement){try{screen.orientation.unlock()}catch(e){}}});
+pl.onpointermove=e=>{if(e.pointerType==='mouse')show()};$('#ui').addEventListener('pointerdown',show);
+let wasHidden=false;const coarse=matchMedia('(pointer:coarse)').matches;v.addEventListener('pointerdown',()=>{wasHidden=pl.classList.contains('hide')});
+v.onclick=e=>{$('#am').classList.remove('on');const now=Date.now(),x=e.clientX/innerWidth;
+  if(now-lastTap<300){clearTimeout(tapT);if(x<.38)seek(-10);else if(x>.62)seek(10);else $('#fs').click();lastTap=0;return}
+  lastTap=now;tapT=setTimeout(()=>{if(wasHidden)show();else if(coarse)pl.classList.add('hide');else tog()},300)};
+addEventListener('keydown',e=>{if(!pl.classList.contains('on'))return;if(pl.classList.contains('gmode')){if(e.key==='Escape')closeP();return}const k=e.key;
+  if(k===' '||k==='k'){e.preventDefault();tog()}else if(k==='ArrowRight'||k==='l')seek(10);else if(k==='ArrowLeft'||k==='j')seek(-10);
+  else if(k==='ArrowUp'){v.volume=Math.min(1,v.volume+.1);$('#vo').value=v.volume}else if(k==='ArrowDown'){v.volume=Math.max(0,v.volume-.1);$('#vo').value=v.volume}
+  else if(k==='f')$('#fs').click();else if(k==='m')v.muted=!v.muted;else if(k==='n')next();else if(k==='Escape'&&!document.fullscreenElement)closeP()});
+addEventListener('beforeunload',save);
+let dip;addEventListener('beforeinstallprompt',e=>{e.preventDefault();dip=e;$('#inst').style.display=''});$('#inst').onclick=()=>{if(dip){dip.prompt();dip=null;$('#inst').style.display='none'}};
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(window.Android)document.documentElement.classList.add('app');
+load();
+</script></body></html>
